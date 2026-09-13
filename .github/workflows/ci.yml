@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: python -m pip install "uv==0.12.13"
+      - name: Install project
+        run: uv sync --locked --extra test
+      - name: Unit tests
+        run: uv run --locked pytest
+      - name: Ruff
+        run: uv run --locked ruff check src tests
+
+  minimum-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install uv
+        run: python -m pip install "uv==0.12.13"
+      - name: Install project and tests
+        run: uv sync --locked --extra test
+      - name: Install declared minimum scientific stack
+        run: >-
+          uv pip install --python .venv/bin/python
+          "numpy==1.26.0"
+          "astropy==6.0.0"
+          "regions==0.9"
+      - name: Verify runtime dependency floors
+        run: >-
+          uv run --no-sync python -c
+          "import astropy,numpy,regions; expected={'numpy':'1.26.0','astropy':'6.0.0','regions':'0.9'}; actual={'numpy':numpy.__version__,'astropy':astropy.__version__,'regions':regions.__version__}; print(actual); assert actual == expected, (actual, expected)"
+      - name: Unit tests at declared floors
+        run: uv run --no-sync pytest
+      - name: Ruff
+        run: uv run --no-sync ruff check src tests
+
+  built-artifact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install uv
+        run: python -m pip install "uv==0.12.13"
+      - name: Check committed dependency resolution
+        run: uv lock --check
+      - name: Build source and wheel artifacts
+        run: uv build --out-dir dist
+      - name: Install wheel in a fresh environment
+        run: |
+          uv venv /tmp/xmm-region-wheel-env --python 3.10
+          uv pip install --python /tmp/xmm-region-wheel-env/bin/python dist/*.whl
+      - name: Verify installed metadata and top-level API outside checkout
+        working-directory: /tmp
+        env:
+          REPOSITORY_CHECKOUT: ${{ github.workspace }}
+        run: |
+          /tmp/xmm-region-wheel-env/bin/python - <<'PY'
+          import os
+          from importlib.metadata import distribution, version
+          from pathlib import Path
+
+          import xmm_region_tool as xrt
+
+          expected_version = "0.1.0rc1"
+          expected_repository = "Repository, https://github.com/JanieDuPreez/xmm-region-tool"
+          dist = distribution("xmm-region-tool")
+          metadata = dist.metadata
+          assert version("xmm-region-tool") == expected_version
+          assert xrt.__version__ == expected_version
+          assert metadata["Requires-Python"] == ">=3.10"
+          assert metadata["License-Expression"] == "BSD-3-Clause"
+          assert metadata.get_all("License-File") == ["LICENSE"]
+          assert expected_repository in (metadata.get_all("Project-URL") or [])
+
+          checkout = Path(os.environ["REPOSITORY_CHECKOUT"]).resolve()
+          module_path = Path(xrt.__file__).resolve()
+          assert checkout not in module_path.parents, (checkout, module_path)
+
+          required_public = {
+              "SasProjectionContext",
+              "project_selection",
+              "write_bound_detector_geometry",
+              "load_bound_detector_geometry",
+              "materialize_bound_sas_regionfile",
+              "selection_from_sky_regions",
+              "convert_selection_batch",
+          }
+          missing = sorted(name for name in required_public if not hasattr(xrt, name))
+          assert not missing, missing
+
+          scripts = {
+              entry.name: entry.value
+              for entry in dist.entry_points
+              if entry.group == "console_scripts"
+          }
+          expected_scripts = {
+              "xmm-region": "xmm_region_tool.science_cli:main",
+              "xmm-region-batch": "xmm_region_tool.science_batch_cli:main",
+              "xmm-region-check": "xmm_region_tool.check_cli:main",
+              "xmm-region-sas-validate": "xmm_region_tool.sas_validate_cli:main",
+          }
+          assert scripts == expected_scripts, scripts
+          PY
+      - name: Verify installed console help surface
+        working-directory: /tmp
+        run: |
+          for command in xmm-region xmm-region-batch xmm-region-check xmm-region-sas-validate; do
+            "/tmp/xmm-region-wheel-env/bin/${command}" --help >/dev/null
+          done
+          test ! -e /tmp/xmm-region-wheel-env/bin/xmm-region-validate
+
+  security-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.10"
+      - name: Install uv
+        run: python -m pip install "uv==0.12.13"
+      - name: Install locked test environment
+        run: uv sync --locked --extra test
+      - name: Security regression gate
+        run: >-
+          uv run --locked pytest
+          tests/test_namespace_preflight_wave_f.py
+          tests/test_path_safety_wave_f.py
+          tests/test_sas_path_safety_wave_e.py
+          tests/test_atomic_publication_wave_f.py
+          tests/test_checker_integrity_wave_g.py
+          tests/test_resource_limits.py
+          tests/test_sas_validation.py
+          tests/test_terminal_safety_wave_g.py
+          tests/test_subprocess_capture_wave_g.py
+          tests/test_security_release_gate_wave_h.py
+          tests/test_release_hardening_followups.py

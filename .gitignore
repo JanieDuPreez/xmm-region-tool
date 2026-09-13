@@ -1,0 +1,56 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Packaging/build output
+build/
+dist/
+*.egg-info/
+
+# Editor/OS clutter
+.vscode/
+.idea/
+.DS_Store
+
+# Current ESAS filtered event products (large local science data)
+mos1*-allevc.fits
+mos2*-allevc.fits
+pn*-allevc.fits
+pn*-allevcoot.fits
+pn*-allevc-oot.fits
+
+# xmm-region-tool generated evidence/manifests
+*.provenance.json
+*-xmm-region-manifest.json
+
+# Automatically named release-CLI wrappers and FITS REGION products.
+# Keep these narrow rather than ignoring all .fits/.txt files so intentional
+# small scientific/test fixtures remain easy to version explicitly.
+*-mos1.txt
+*-mos1-*.txt
+*-mos1.fits
+*-mos1-*.fits
+*-mos2.txt
+*-mos2-*.txt
+*-mos2.fits
+*-mos2-*.fits
+*-pn.txt
+*-pn-*.txt
+*-pn.fits
+*-pn-*.fits
+
+# Temporary/private sibling files used during atomic publication should never
+# be source artifacts if a process is interrupted. The first two patterns
+# match the actual publication.temporary_sibling() / recovery-backup names.
+.*.xmm-region-stage-*
+.*.xmm-region-backup-*
+.*.tmp
+.*.bak
