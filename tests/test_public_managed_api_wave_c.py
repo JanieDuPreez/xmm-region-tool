@@ -20,7 +20,13 @@ from xmm_region_tool.calibration import CalibrationIdentity, SasProducerIdentity
 from xmm_region_tool.context_identity import canonical_context_identity_sha256
 from xmm_region_tool.event_roles import read_science_calinfoset_identity
 from xmm_region_tool.model import DetectorBoundary, DetectorRegion, DetectorSelection
-from xmm_region_tool.provenance import EventIdentity, file_sha256
+from xmm_region_tool.artifacts import write_detector_geometry
+from xmm_region_tool.provenance import (
+    EventIdentity,
+    EventIdentityError,
+    file_sha256,
+    read_event_identity,
+)
 
 
 def _write_event(path: Path, *, marker: str | None = None) -> Path:
@@ -264,4 +270,122 @@ def test_top_level_managed_reuse_rejects_changed_exact_event_generation(tmp_path
             sas_producer=producer,
             expected_celestial_geometry_sha256=artifact.celestial_geometry_sha256,
             expected_projection_identity_sha256=artifact.projection_identity_sha256,
+        )
+
+
+
+def test_managed_write_keeps_science_calinfoset_event_role_during_durable_reread(tmp_path):
+    event = tmp_path / "pnS003-allevc.fits"
+    primary = fits.PrimaryHDU()
+    primary.header["TELESCOP"] = "XMM"
+    primary.header["INSTRUME"] = "EPN"
+    primary.header["OBS_ID"] = "0144310101"
+    primary.header["EXP_ID"] = "0144310101003"
+    primary.header["EXPIDSTR"] = "S003"
+    primary.header["DATE-OBS"] = "2002-12-22T21:48:12"
+    primary.header["DATE_OBS"] = "2002-12-22T20:56:03.000"
+    primary.header["RA_PNT"] = 15.701125
+    primary.header["DEC_PNT"] = -21.8844166666667
+    primary.header["PA_PNT"] = 227.224395751953
+
+    events = fits.BinTableHDU.from_columns(
+        [
+            fits.Column(name="DETX", format="D", array=np.asarray([1.0, 2.0])),
+            fits.Column(name="DETY", format="D", array=np.asarray([3.0, 4.0])),
+        ],
+        name="EVENTS",
+    )
+    events.header["TELESCOP"] = "XMM"
+    events.header["INSTRUME"] = "EPN"
+    events.header["OBS_ID"] = "0144310101"
+    events.header["EXP_ID"] = "0144310101003"
+    events.header["EXPIDSTR"] = "S003"
+    events.header["DATE-OBS"] = "2002-12-22T21:48:12"
+    events.header["DATE_OBS"] = "2002-12-22T20:56:03.000"
+    events.header["RA_PNT"] = 15.701125
+    events.header["DEC_PNT"] = -21.8844166666667
+    events.header["PA_PNT"] = 227.224395751953
+    fits.HDUList([primary, events]).writeto(event)
+
+    with pytest.raises(EventIdentityError, match="conflicting event header DATE-OBS"):
+        read_event_identity(event)
+
+    science_identity = read_science_calinfoset_identity(event)
+    assert science_identity.date_obs == "2002-12-22T21:48:12"
+
+    calibration = _calibration(tmp_path)
+    producer = _producer()
+    result = _projection_result(event, calibration, producer)
+
+    artifact = write_bound_detector_geometry(
+        tmp_path / "geometry.fits",
+        result,
+        event_file=event,
+        calibration_identity=calibration,
+        sas_producer=producer,
+    )
+    reloaded = xmm_region_tool.load_bound_detector_geometry(
+        artifact.path,
+        projection_evidence=artifact.projection_evidence,
+    )
+    wrapper = materialize_bound_sas_regionfile(
+        tmp_path / "run" / "region.txt",
+        reloaded,
+        event_file=event,
+        calibration_identity=calibration,
+        sas_producer=producer,
+        expected_celestial_geometry_sha256=artifact.celestial_geometry_sha256,
+        expected_projection_identity_sha256=artifact.projection_identity_sha256,
+    )
+
+    assert artifact.path.is_file()
+    assert artifact.projection_evidence.is_file()
+    assert reloaded.event_identity_sha256 == result.provenance.event_identity_sha256
+    assert wrapper.path.is_file()
+    assert wrapper.geometry_path.is_file()
+
+
+def test_generic_detector_writer_still_uses_strict_generic_event_identity(tmp_path):
+    event = tmp_path / "event.fits"
+    primary = fits.PrimaryHDU()
+    primary.header["TELESCOP"] = "XMM"
+    primary.header["INSTRUME"] = "EMOS1"
+    primary.header["OBS_ID"] = "0144310101"
+    primary.header["EXP_ID"] = "S001"
+    primary.header["DATE-OBS"] = "2003-06-22T00:00:00"
+    primary.header["DATE_OBS"] = "2003-06-21T23:59:00.000"
+    primary.header["RA_PNT"] = 15.673
+    primary.header["DEC_PNT"] = -21.88
+    primary.header["PA_PNT"] = 72.0
+
+    events = fits.BinTableHDU.from_columns(
+        [
+            fits.Column(name="DETX", format="D", array=np.asarray([1.0, 2.0])),
+            fits.Column(name="DETY", format="D", array=np.asarray([3.0, 4.0])),
+        ],
+        name="EVENTS",
+    )
+    events.header["TELESCOP"] = "XMM"
+    events.header["INSTRUME"] = "EMOS1"
+    events.header["OBS_ID"] = "0144310101"
+    events.header["EXP_ID"] = "S001"
+    events.header["DATE-OBS"] = "2003-06-22T00:00:00"
+    events.header["DATE_OBS"] = "2003-06-21T23:59:00.000"
+    events.header["RA_PNT"] = 15.673
+    events.header["DEC_PNT"] = -21.88
+    events.header["PA_PNT"] = 72.0
+    fits.HDUList([primary, events]).writeto(event)
+
+    calibration = _calibration(tmp_path)
+    producer = _producer()
+    result = _projection_result(event, calibration, producer)
+    science_identity = read_science_calinfoset_identity(event)
+
+    with pytest.raises(ArtifactMaterializationError, match="cannot re-read"):
+        write_detector_geometry(
+            tmp_path / "generic-geometry.fits",
+            result,
+            event_identity=science_identity,
+            calibration_identity=calibration,
+            sas_producer=producer,
         )

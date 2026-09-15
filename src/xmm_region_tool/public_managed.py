@@ -22,7 +22,7 @@ from astropy.io import fits
 from .artifacts import ArtifactMaterializationError, SasRegionfileMaterialization
 from .calibration import CalibrationIdentity, SasProducerIdentity
 from .context_identity import ContextIdentityError, validate_projection_context_identity
-from .event_roles import read_science_calinfoset_snapshot
+from .event_roles import read_science_calinfoset_identity, read_science_calinfoset_snapshot
 from .execution import ProjectionResult
 from .json_policy import StrictJsonError, loads_strict
 from .limits import bounded_text
@@ -617,6 +617,7 @@ def write_bound_detector_geometry(
         source_region_sha256=source_region_sha256,
         source_region_origin=source_region_origin,
         max_components=max_components,
+        _event_identity_reader=read_science_calinfoset_identity,
     )
     _validate_persisted_managed_evidence(artifact)
     return artifact

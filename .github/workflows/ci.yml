@@ -89,7 +89,7 @@ jobs:
 
           import xmm_region_tool as xrt
 
-          expected_version = "0.1.0rc1"
+          expected_version = "0.1.0rc2"
           expected_repository = "Repository, https://github.com/JanieDuPreez/xmm-region-tool"
           dist = distribution("xmm-region-tool")
           metadata = dist.metadata

@@ -4,7 +4,7 @@
 
 ## Release status
 
-The current public-test release line is `0.1.0rc1`. It is intended for external testing before the first stable `0.1.0` release.
+The current public-test release line is `0.1.0rc2`. It is intended for external testing before the first stable `0.1.0` release.
 
 After the release candidate is published to PyPI, install it with:
 
@@ -15,7 +15,7 @@ pip install --pre xmm-region-tool
 or pin the exact candidate:
 
 ```bash
-pip install xmm-region-tool==0.1.0rc1
+pip install xmm-region-tool==0.1.0rc2
 ```
 
 Python 3.10 or newer is required. Scientific conversion also requires an initialized XMM-Newton SAS environment with valid calibration/observation context.

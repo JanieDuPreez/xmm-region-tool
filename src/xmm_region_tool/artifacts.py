@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from astropy.io import fits
 
@@ -26,6 +27,9 @@ from .topology import DetectorTopologyError, validate_detector_regions
 
 class ArtifactMaterializationError(ValueError):
     """Raised when a durable geometry artifact cannot be staged safely for SAS."""
+
+
+EventIdentityReader = Callable[[str | Path], EventIdentity]
 
 
 def _file_sha256(path: Path) -> str:
@@ -286,11 +290,12 @@ def _validate_material_provenance(
     event_identity: EventIdentity | None,
     calibration_identity: CalibrationIdentity | None,
     sas_producer: SasProducerIdentity | None,
+    event_identity_reader: EventIdentityReader = read_event_identity,
 ) -> None:
     provenance = result.provenance
     if event_identity is not None:
         try:
-            current_identity = read_event_identity(event_identity.path)
+            current_identity = event_identity_reader(event_identity.path)
         except (EventIdentityError, OSError) as exc:
             raise ArtifactMaterializationError(
                 "cannot re-read the current event artifact before durable materialisation"
@@ -350,6 +355,7 @@ def write_detector_geometry(
     sas_producer: SasProducerIdentity | None = None,
     max_components: int = 4096,
     write_evidence: bool = True,
+    _event_identity_reader: EventIdentityReader = read_event_identity,
 ) -> DetectorGeometryArtifact:
     """Materialise durable FITS geometry without creating an absolute-path wrapper.
 
@@ -369,6 +375,7 @@ def write_detector_geometry(
         event_identity=event_identity,
         calibration_identity=calibration_identity,
         sas_producer=sas_producer,
+        event_identity_reader=_event_identity_reader,
     )
     output = write_fits_region(
         path,

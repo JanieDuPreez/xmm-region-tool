@@ -26,7 +26,7 @@ from .artifacts import (
 )
 from .calibration import CalibrationIdentity, SasProducerIdentity
 from .execution import ADAPTIVE_REFINEMENT, LEGACY_REFINEMENT, ProjectionResult, ProjectionRule
-from .provenance import EventIdentity, file_sha256
+from .provenance import EventIdentity, file_sha256, read_event_identity
 from .publication import (
     discard_staged,
     lexical_absolute_path,
@@ -76,6 +76,7 @@ def write_bound_detector_geometry(
     source_region_sha256: str | None = None,
     source_region_origin: str | None = None,
     max_components: int = 4096,
+    _event_identity_reader=read_event_identity,
 ) -> BoundDetectorGeometryArtifact:
     """Write a fully provenance-bound detector artifact for managed reuse."""
     final_geometry = lexical_absolute_path(path)
@@ -93,6 +94,7 @@ def write_bound_detector_geometry(
             sas_producer=sas_producer,
             max_components=max_components,
             write_evidence=True,
+            _event_identity_reader=_event_identity_reader,
         )
         if artifact.projection_evidence is None:
             raise ArtifactMaterializationError(
