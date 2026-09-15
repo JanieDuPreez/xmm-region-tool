@@ -31,4 +31,4 @@ Current release-candidate artifacts generated through the managed path include t
 
 ## Release packaging
 
-The external-test release line uses an explicit prerelease distribution version (`0.1.0rc1`). Exact installed source hashing remains useful as an additional source/build discriminator, especially for editable or locally rebuilt environments. The durable provenance contract does not treat the human-readable version string alone as an exact source identifier.
+The external-test release line uses an explicit prerelease distribution version (`0.1.0rc2`). Exact installed source hashing remains useful as an additional source/build discriminator, especially for editable or locally rebuilt environments. The durable provenance contract does not treat the human-readable version string alone as an exact source identifier.
