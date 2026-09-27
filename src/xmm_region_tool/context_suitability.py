@@ -3,8 +3,9 @@
 The checks in this module deliberately separate two roles:
 
 * an active ``*SUM.SAS`` provides an operational observation-association guard;
-* the original ODF ``*SUM.ASC`` provides the observation-level date that
-  ``cifbuild`` used by default, which can be compared to CIF ``OBSVDATE``.
+* CIF ``OBSVDATE`` must exactly match the scheduled start from the active
+  SAS summary used by ``cifbuild``, or the original ODF ``*SUM.ASC`` when
+  that earlier summary supplied the CIF date.
 
 For an intentionally ODF-independent ``cifbuild withobservationdate=yes`` setup,
 callers may instead supply an explicit immutable observation record.  That route
@@ -173,17 +174,33 @@ def _sosf_odf_path(text: str, *, summary_path: Path) -> Path | None:
     return None
 
 
-def _unique_original_summary(directory: Path) -> Path:
-    candidates = sorted(path for path in directory.glob("*SUM.ASC") if path.is_file())
+def _unique_summary(directory: Path, suffix: str) -> Path | None:
+    candidates = sorted(path for path in directory.glob(f"*SUM.{suffix}") if path.is_file())
     if not candidates:
+        return None
+    if len(candidates) != 1:
+        raise ContextSuitabilityError(
+            f"ODF directory contains multiple *SUM.{suffix} files; "
+            "observation association is ambiguous"
+        )
+    return candidates[0]
+
+
+def _unique_original_summary(directory: Path) -> Path:
+    summary = _unique_summary(directory, "ASC")
+    if summary is None:
         raise ContextSuitabilityError(
             f"ODF directory contains no *SUM.ASC original summary: {directory}"
         )
-    if len(candidates) != 1:
-        raise ContextSuitabilityError(
-            "ODF directory contains multiple *SUM.ASC files; observation association is ambiguous"
-        )
-    return candidates[0]
+    return summary
+
+
+def _preferred_directory_summary(directory: Path) -> Path:
+    """Follow OAL precedence: generated SUM.SAS first, otherwise original SUM.ASC."""
+    summary = _unique_summary(directory, "SAS")
+    if summary is not None:
+        return summary
+    return _unique_original_summary(directory)
 
 
 def _resolve_active_odf(raw: str) -> Path:
@@ -266,16 +283,15 @@ def capture_context_suitability(
 ) -> ContextSuitabilityEvidence:
     """Prove observation association and material CIF date suitability.
 
-    Normal SAS setup is proved from ``SAS_ODF``. A ``*SUM.SAS`` is used only
-    as an operational ObsID guard; its PATH is followed to the original ODF
-    ``*SUM.ASC`` because that is the observation-level source from which
-    ``cifbuild`` normally obtained the date recorded as ``OBSVDATE``.
+    Normal SAS setup is proved from ``SAS_ODF``. If its active summary is a
+    generated ``*SUM.SAS``, that summary supplies the first exact candidate
+    for CIF ``OBSVDATE``; the original ODF ``*SUM.ASC`` is consulted only
+    when the CIF predates ``odfingest`` and therefore carries the earlier
+    original-ODF start. Directory-valued ``SAS_ODF`` follows OAL precedence
+    by selecting ``*SUM.SAS`` before ``*SUM.ASC``.
 
     When ``SAS_ODF`` is intentionally absent, an explicit ``ObservationRecord``
-    supports the documented ``cifbuild withobservationdate=yes`` workflow. That
-    record is assertion evidence, so the implementation additionally checks its
-    ObsID against the event, its start against the CIF ``OBSVDATE``, and the
-    event ``DATE-OBS`` against the declared observation interval.
+    supports the documented ``cifbuild withobservationdate=yes`` workflow.
     """
     cif_obsvdate = _one_cif_timestamp(calibration.cif_path, "OBSVDATE")
     cif_analdate = _one_cif_timestamp(calibration.cif_path, "ANALDATE")
@@ -307,63 +323,77 @@ def capture_context_suitability(
             observation_end=declared_observation.scheduled_end,
         )
 
-    active = _resolve_active_odf(raw_odf)
+    resolved = _resolve_active_odf(raw_odf)
+    active_was_directory = resolved.is_dir()
+    active = _preferred_directory_summary(resolved) if active_was_directory else resolved
+
     active_summary_sha: str | None = None
     original_summary_sha: str | None = None
 
-    if active.is_dir():
-        original = _unique_original_summary(active)
-        original_text = _read_text(original, description="original ODF summary")
-        original_record = _observation_record(original_text)
-        association_record = original_record
-        source = "original-odf"
-        original_summary_sha = _file_sha256(original)
-    else:
-        active_text = _read_text(active, description="active SAS_ODF summary")
-        active_record = _observation_record(active_text)
-        active_summary_sha = _file_sha256(active)
+    active_text = _read_text(active, description="active SAS_ODF summary")
+    active_record = _observation_record(active_text)
+    is_original = active.suffix.upper() == ".ASC" or active.name.upper().endswith("SUM.ASC")
 
-        if active.suffix.upper() == ".ASC" or active.name.upper().endswith("SUM.ASC"):
-            original_record = active_record
-            association_record = active_record
-            source = "original-odf"
-            original_summary_sha = active_summary_sha
+    if active_record.obs_id != event_identity.obs_id:
+        if is_original:
+            raise ContextSuitabilityError(
+                f"active ODF evidence belongs to ObsID {active_record.obs_id}, "
+                f"but projection event belongs to {event_identity.obs_id}"
+            )
+        raise ContextSuitabilityError(
+            "active SAS ODF summary belongs to ObsID "
+            f"{active_record.obs_id}, but projection event belongs to "
+            f"{event_identity.obs_id}"
+        )
+
+    if is_original:
+        material_record = active_record
+        association_record = active_record
+        source = "original-odf"
+        original_summary_sha = _file_sha256(active)
+        if not active_was_directory:
+            active_summary_sha = original_summary_sha
+        if material_record.scheduled_start != cif_obsvdate:
+            raise ContextSuitabilityError(
+                "active CIF OBSVDATE does not match the original ODF observation start: "
+                f"CIF={cif_obsvdate}, ODF={material_record.scheduled_start}"
+            )
+    else:
+        active_summary_sha = _file_sha256(active)
+        association_record = active_record
+
+        if active_record.scheduled_start == cif_obsvdate:
+            material_record = active_record
+            source = "sas-summary"
         else:
-            if active_record.obs_id != event_identity.obs_id:
-                raise ContextSuitabilityError(
-                    "active SAS ODF summary belongs to ObsID "
-                    f"{active_record.obs_id}, but projection event belongs to "
-                    f"{event_identity.obs_id}"
-                )
             odf_dir = _sosf_odf_path(active_text, summary_path=active)
             if odf_dir is None or not odf_dir.is_dir():
                 raise ContextSuitabilityError(
-                    "active *SUM.SAS has no usable PATH back to the original ODF; "
-                    "cannot prove the CIF observation date from the SOSF alone"
+                    "active CIF OBSVDATE does not match the active *SUM.SAS observation "
+                    "start and the summary has no usable PATH back to the original ODF: "
+                    f"CIF={cif_obsvdate}, SAS={active_record.scheduled_start}"
                 )
+
             original = _unique_original_summary(odf_dir)
             original_text = _read_text(original, description="original ODF summary")
             original_record = _observation_record(original_text)
-            association_record = active_record
-            source = "sas-summary+original-odf"
             original_summary_sha = _file_sha256(original)
 
-    if association_record.obs_id != event_identity.obs_id:
-        raise ContextSuitabilityError(
-            f"active ODF evidence belongs to ObsID {association_record.obs_id}, "
-            f"but projection event belongs to {event_identity.obs_id}"
-        )
-    if original_record.obs_id != event_identity.obs_id:
-        raise ContextSuitabilityError(
-            f"original ODF belongs to ObsID {original_record.obs_id}, "
-            f"but projection event belongs to {event_identity.obs_id}"
-        )
-    if original_record.scheduled_start != cif_obsvdate:
-        raise ContextSuitabilityError(
-            "active CIF OBSVDATE does not match the original ODF observation start: "
-            f"CIF={cif_obsvdate}, ODF={original_record.scheduled_start}"
-        )
-    if declared_observation is not None and declared_observation != original_record:
+            if original_record.obs_id != event_identity.obs_id:
+                raise ContextSuitabilityError(
+                    f"original ODF belongs to ObsID {original_record.obs_id}, "
+                    f"but projection event belongs to {event_identity.obs_id}"
+                )
+            if original_record.scheduled_start != cif_obsvdate:
+                raise ContextSuitabilityError(
+                    "active CIF OBSVDATE does not match either verified observation start: "
+                    f"CIF={cif_obsvdate}, SAS={active_record.scheduled_start}, "
+                    f"ODF={original_record.scheduled_start}"
+                )
+            material_record = original_record
+            source = "sas-summary+original-odf"
+
+    if declared_observation is not None and declared_observation != material_record:
         raise ContextSuitabilityError(
             "explicit observation evidence conflicts with the active ODF observation record"
         )
@@ -374,8 +404,8 @@ def capture_context_suitability(
         cif_analdate=cif_analdate,
         association_source=source,
         association_obs_id=association_record.obs_id,
-        observation_start=original_record.scheduled_start,
-        observation_end=original_record.scheduled_end,
+        observation_start=material_record.scheduled_start,
+        observation_end=material_record.scheduled_end,
         active_summary_sha256=active_summary_sha,
         original_summary_sha256=original_summary_sha,
     )
