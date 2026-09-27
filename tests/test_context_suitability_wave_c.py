@@ -66,25 +66,38 @@ def _observation_block(*, obs_id: str, start: str, end: str) -> str:
     ) + "\n"
 
 
-def _write_original_odf(directory: Path, *, obs_id: str = "0723802001") -> Path:
+def _write_original_odf(
+    directory: Path,
+    *,
+    obs_id: str = "0723802001",
+    start: str = "2013-06-08T14:52:32",
+    end: str = "2013-06-09T16:34:12",
+) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     summary = directory / f"2472_{obs_id}_SCX00000SUM.ASC"
     summary.write_text(
         _observation_block(
             obs_id=obs_id,
-            start="2013-06-08T14:52:32",
-            end="2013-06-09T16:34:12",
+            start=start,
+            end=end,
         )
     )
     return summary
 
 
-def _write_sosf(path: Path, odf_dir: Path, *, obs_id: str = "0723802001") -> Path:
+def _write_sosf(
+    path: Path,
+    odf_dir: Path,
+    *,
+    obs_id: str = "0723802001",
+    start: str = "2013-06-08T15:09:56",
+    end: str = "2013-06-09T15:44:18",
+) -> Path:
     path.write_text(
         _observation_block(
             obs_id=obs_id,
-            start="2013-06-08T15:09:56",
-            end="2013-06-09T15:44:18",
+            start=start,
+            end=end,
         )
         + f"PATH {odf_dir}\n"
     )
@@ -109,6 +122,95 @@ def test_real_fixture_relationship_accepts_sosf_plus_original_odf(tmp_path):
     assert evidence.cif_obsvdate == evidence.observation_start
     assert evidence.active_summary_sha256 is not None
     assert evidence.original_summary_sha256 is not None
+
+
+def test_field_report_accepts_cif_rebuilt_from_active_sosf(tmp_path):
+    obs_id = "0693010301"
+    cif = _write_cif(tmp_path / "ccf.cif", obsvdate="2012-06-08T02:45:44")
+    odf_dir = tmp_path / "odf"
+    _write_original_odf(
+        odf_dir,
+        obs_id=obs_id,
+        start="2012-06-08T02:28:18",
+        end="2012-06-09T05:00:00",
+    )
+    sosf = _write_sosf(
+        tmp_path / "2289_0693010301_SCX00000SUM.SAS",
+        odf_dir,
+        obs_id=obs_id,
+        start="2012-06-08T02:45:44",
+        end="2012-06-09T04:30:00",
+    )
+
+    evidence = capture_context_suitability(
+        environment={"SAS_ODF": str(sosf)},
+        calibration=_calibration(cif),
+        event_identity=_event(obs_id=obs_id, date_obs="2012-06-08T03:00:00"),
+    )
+
+    assert evidence.association_source == "sas-summary"
+    assert evidence.cif_obsvdate == "2012-06-08T02:45:44.000"
+    assert evidence.observation_start == evidence.cif_obsvdate
+    assert evidence.active_summary_sha256 is not None
+    assert evidence.original_summary_sha256 is None
+
+
+def test_directory_sas_odf_prefers_generated_sosf_over_original_summary(tmp_path):
+    cif = _write_cif(tmp_path / "ccf.cif", obsvdate="2013-06-08T15:09:56")
+    odf_dir = tmp_path / "odf"
+    _write_original_odf(odf_dir)
+    _write_sosf(
+        odf_dir / "2472_0723802001_SCX00000SUM.SAS",
+        odf_dir,
+    )
+
+    evidence = capture_context_suitability(
+        environment={"SAS_ODF": str(odf_dir)},
+        calibration=_calibration(cif),
+        event_identity=_event(),
+    )
+
+    assert evidence.association_source == "sas-summary"
+    assert evidence.observation_start == "2013-06-08T15:09:56.000"
+    assert evidence.active_summary_sha256 is not None
+    assert evidence.original_summary_sha256 is None
+
+
+def test_sosf_without_original_path_is_valid_when_cif_matches_sosf(tmp_path):
+    cif = _write_cif(tmp_path / "ccf.cif", obsvdate="2013-06-08T15:09:56")
+    sosf = tmp_path / "summary.SAS"
+    sosf.write_text(
+        _observation_block(
+            obs_id="0723802001",
+            start="2013-06-08T15:09:56",
+            end="2013-06-09T15:44:18",
+        )
+    )
+
+    evidence = capture_context_suitability(
+        environment={"SAS_ODF": str(sosf)},
+        calibration=_calibration(cif),
+        event_identity=_event(),
+    )
+
+    assert evidence.association_source == "sas-summary"
+    assert evidence.observation_start == evidence.cif_obsvdate
+
+
+def test_original_odf_mismatch_is_irrelevant_when_active_sosf_supplies_cif_date(tmp_path):
+    cif = _write_cif(tmp_path / "ccf.cif", obsvdate="2013-06-08T15:09:56")
+    odf_dir = tmp_path / "odf"
+    _write_original_odf(odf_dir, obs_id="0144310101")
+    sosf = _write_sosf(tmp_path / "summary.SAS", odf_dir)
+
+    evidence = capture_context_suitability(
+        environment={"SAS_ODF": str(sosf)},
+        calibration=_calibration(cif),
+        event_identity=_event(),
+    )
+
+    assert evidence.association_source == "sas-summary"
+    assert evidence.original_summary_sha256 is None
 
 
 def test_sosf_obsid_mismatch_fails_before_material_date_check(tmp_path):

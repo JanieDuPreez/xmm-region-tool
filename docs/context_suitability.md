@@ -25,15 +25,16 @@ The production rule is based on the real A133 ObsID `0723802001` SAS 22.1.0 fixt
 
 PRIMARY and EVENTS headers agreed within each of the three event products. The exposure timestamps differ across instruments, as expected for one observation containing several exposures.
 
-The important result is that CIF `OBSVDATE` equals the **original ODF observation start exactly**. It does not equal the later generated summary start or the individual MOS/pn exposure starts.
+For this fixture, CIF `OBSVDATE` equals the **original ODF observation start exactly** because the CIF was built from that ODF state. It does not equal the later generated summary start or the individual MOS/pn exposure starts.
 
-Consequently the package must not use weaker predicates such as:
+The package must not infer suitability from weaker predicates such as:
 
 - CIF `OBSVDATE == event DATE-OBS`;
-- CIF `OBSVDATE == generated *SUM.SAS start`;
 - all cameras sharing one `DATE-OBS`;
 - CIF/event dates merely occurring on the same calendar day;
 - CIF/event times being within an arbitrary tolerance.
+
+A later CIF rebuild can legitimately use the generated `*SUM.SAS` observation start instead; that distinct SAS-supported history is described below.
 
 ## Standard SAS/ODF workflow
 
@@ -43,15 +44,30 @@ If `SAS_ODF` points at a generated `*SUM.SAS`:
 
 1. parse its internal fixed-width `OBSERVATION` record;
 2. require its ObsID to equal the event ObsID;
-3. follow its recorded `PATH` to the original ODF directory;
-4. require exactly one original `*SUM.ASC` there;
-5. parse the original ODF `OBSERVATION` record;
-6. require its ObsID to equal the event ObsID;
-7. require its observation start to equal CIF `OBSVDATE` exactly after canonical FITS-time parsing.
+3. if its scheduled start equals CIF `OBSVDATE` exactly, accept that generated summary as the material observation-date evidence;
+4. otherwise follow its recorded `PATH` to the original ODF directory;
+5. require exactly one original `*SUM.ASC` there;
+6. parse the original ODF `OBSERVATION` record and require its ObsID to equal the event ObsID;
+7. require that original observation start to equal CIF `OBSVDATE` exactly.
 
-If `SAS_ODF` already points at the original ODF directory or `*SUM.ASC`, the original observation record provides both association and material-date evidence directly.
+This represents two legitimate CIF-build histories without introducing a fuzzy time rule: a CIF built before `odfingest` can carry the original `*SUM.ASC` start, while a CIF rebuilt after `odfingest` can carry the active `*SUM.SAS` start.
 
-A matching generated-summary ObsID alone is deliberately insufficient. A stale CIF from observation A combined with `SAS_ODF` and an event from observation B must still fail the material date/ODF check.
+If `SAS_ODF` points at a directory containing both summary forms, the implementation follows the SAS OAL precedence and selects `*SUM.SAS` before `*SUM.ASC`. If only the original `*SUM.ASC` is available, that record provides both association and material-date evidence directly.
+
+A matching summary ObsID alone is deliberately insufficient. The CIF date must still equal one of the exact, machine-verified observation starts available through the active SAS ODF evidence.
+
+## External field report: ACT-CL J0019.6+0336
+
+External standalone testing on ObsID `0693010301` exposed the second valid history. After `odfingest` and a CIF rebuild, the reported values were:
+
+| Evidence | Value |
+| --- | --- |
+| CIF `OBSVDATE` | `2012-06-08T02:45:44` |
+| original ODF observation start | `2012-06-08T02:28:18` |
+
+The 17m26s offset is very similar to the A133 fixture's 17m24s separation between original ODF and generated SAS-summary starts. More importantly, SAS documents that `cifbuild` obtains its observation date from the active ODF unless an explicit observation date is supplied, and that a generated summary may be the active ODF. The correct software rule is therefore provenance-sensitive exact matching, not unconditional equality with the original ODF start.
+
+Regression coverage reproduces this timestamp pattern and requires acceptance only when the active generated summary carries `2012-06-08T02:45:44` for the same ObsID. A CIF date matching neither the active generated summary nor the verified original summary still fails closed.
 
 ## ODF-independent CIF construction
 
@@ -96,4 +112,4 @@ This preserves path relocation and avoids turning non-material workflow state in
 
 ## Validation scope
 
-The date/association relationship above is grounded in a real A133 SAS 22.1.0 fixture. Automated tests exercise failure cases and ordering, including stale-CIF and wrong-observation-summary rejection before any detector projection call. Those synthetic tests verify software behaviour; they do not substitute for the real fixture evidence and do not claim to validate SAS detector geometry.
+The original-date relationship is grounded in a real A133 SAS 22.1.0 fixture. The generated-summary-date path is covered by a regression derived from the ACT-CL J0019.6+0336 external field report and the documented SAS active-ODF rules. Automated tests exercise both histories plus stale-CIF and wrong-observation-summary rejection. These software tests do not claim to validate SAS detector geometry; the external observation remains useful as a focused real-SAS confirmation of the corrected admission rule.
