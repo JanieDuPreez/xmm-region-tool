@@ -85,6 +85,51 @@ def _reject_known_pn_oot_role(path: Path, identity: EventIdentity) -> None:
         )
 
 
+def read_event_association_identity(path: str | Path) -> EventIdentity:
+    """Read only stable EPIC association fields needed to pair related products.
+
+    This deliberately ignores timing and pointing metadata. It is intended for
+    role association, such as matching a pn OOT sibling to its normal science
+    event, where instrument/ObsID/exposure identity is material but calibration
+    ownership is not. Scientific projection must use
+    :func:`read_science_calinfoset_identity` instead.
+    """
+    event_path = Path(path).expanduser().resolve()
+    if not event_path.is_file():
+        raise EventIdentityError(f"event file does not exist: {event_path}")
+
+    with fits.open(event_path, memmap=True) as hdus:
+        event_hdu = hdus[canonical_event_hdu_index(hdus)]
+        headers = [event_hdu.header, hdus[0].header]
+
+        instrument, instrument_header = _coherent_instrument(headers)
+        obs_id = _coherent_text(
+            headers,
+            name="OBS_ID",
+            keys=("OBS_ID", "OBSID"),
+            required=True,
+        )
+        assert obs_id is not None
+        exposure_id = _coherent_exposure_id(headers)
+        telescope = _coherent_telescope(headers)
+
+    if telescope is None:
+        raise EventIdentityError("associated event product has no XMM TELESCOP identity")
+
+    return EventIdentity(
+        path=event_path,
+        instrument=instrument,
+        instrument_header=instrument_header,
+        obs_id=obs_id,
+        exposure_id=exposure_id,
+        telescope=telescope,
+        date_obs=None,
+        ra_pnt=None,
+        dec_pnt=None,
+        pa_pnt=None,
+    )
+
+
 def read_science_calinfoset_identity(path: str | Path) -> EventIdentity:
     """Read and validate one event for the normal ``calinfostyle=set`` role.
 
