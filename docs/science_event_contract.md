@@ -8,7 +8,7 @@ The package distinguishes **generic event identity inspection** from the stricte
 
 ## Science-calinfoset role
 
-`project_selection()` requires the supplied event product to pass `read_science_calinfoset_identity()` before the first `esky2det` subprocess is started.
+`project_selection()` requires the supplied event product to pass `read_science_calinfoset_identity()` before the first `esky2det` subprocess is started. The standalone CLI uses that same role-specific reader during canonical `*-allevc.fits` discovery and event-set preflight, so a valid science product is not filtered through a stricter generic metadata interpretation before projection.
 
 For this role the **primary header** must contain non-empty values for:
 
@@ -74,12 +74,12 @@ A pn cleaned OOT list is a different workflow role from the normal pn science ev
 *-allevc-oot.fits
 ```
 
-`pn_oot_event_file()` may still resolve those names as an `ootevtfile` sibling. A resolved sibling must be a physically distinct file from the science event and must not be byte-identical to it; matching instrument, ObsID and exposure are necessary but not sufficient evidence of a valid role pairing.
+`pn_oot_event_file()` may still resolve those names as an `ootevtfile` sibling. A resolved sibling must be a physically distinct file from the science event and must not be byte-identical to it; matching instrument, ObsID and exposure are necessary but not sufficient evidence of a valid role pairing. OOT pairing uses a narrower association identity that deliberately ignores timing/pointing aliases, because those fields are not needed to prove the sibling relationship and real pn products can retain legacy timing metadata that generic identity inspection rejects.
 
 This is deliberately a fail-closed **known-product-name** guard, not a cryptographic OOT classifier. An arbitrarily renamed OOT event list can be indistinguishable from the normal list using the currently retained event headers, so the package does not claim to detect such a renamed artifact.
 
 ## Evidence boundary
 
-Synthetic tests prove that incomplete, malformed or physically invalid calibration metadata fails before `esky2det` is invoked and that generic event inspection can remain less restrictive where appropriate. They also prove that known OOT names cannot enter the normal science role, that aliased/identical science/OOT sibling files are rejected, that a persistent A -> B event-file replacement during the initial identity/SHA snapshot fails closed, that same-identity exact-byte drift cannot cross batch/CLI materialisation boundaries, that multi-cell CLI runs retain one frozen generation, that durable artifact promotion re-reads the real event, and that validator expected/SAS membership is based on one captured generation. They do **not** prove protection against the concurrent ABA/in-place mutation case described above, nor do they prove which header cards a real SAS installation reads.
+Synthetic tests prove that incomplete, malformed or physically invalid calibration metadata fails before `esky2det` is invoked, that standalone discovery/preflight accepts real-style pn science timing aliases through the science-calinfoset role, and that generic event inspection remains independently strict. They also prove that known OOT names cannot enter the normal science role, that aliased/identical science/OOT sibling files are rejected, that a persistent A -> B event-file replacement during the initial identity/SHA snapshot fails closed, that same-identity exact-byte drift cannot cross batch/CLI materialisation boundaries, that multi-cell CLI runs retain one frozen generation, that durable artifact promotion re-reads the real event, and that validator expected/SAS membership is based on one captured generation. They do **not** prove protection against the concurrent ABA/in-place mutation case described above, nor do they prove which header cards a real SAS installation reads.
 
 Real-event acceptance was checked separately on canonical MOS/pn ESAS `P-allevc.fits` products: the required calibration-information fields are present in the primary header and ordinary real projection succeeds with explicit `calinfostyle=set`. That real evidence, rather than mocked tests, grounds the supported primary-header/calinfoset contract.
