@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .event_roles import read_event_association_identity, read_science_calinfoset_identity
 from .model import CelestialSelection
 from .path_safety import safe_filename_component
-from .provenance import EventIdentity, file_sha256, read_event_identity
+from .provenance import EventIdentity, file_sha256
 
 
 class WorkflowError(ValueError):
@@ -76,11 +77,18 @@ def _canonical_event_candidates(root: Path, instrument: str) -> list[tuple[Path,
     matches: list[tuple[Path, EventIdentity]] = []
     for path in sorted(root.glob(pattern)):
         try:
-            identity = read_event_identity(path)
-        except Exception:
-            continue
-        if identity.instrument == instrument:
-            matches.append((path.resolve(), identity))
+            identity = read_science_calinfoset_identity(path)
+        except Exception as exc:
+            raise WorkflowError(
+                f"canonical-looking {instrument} ESAS event file cannot be used as a "
+                f"science/calinfoset product: {path.name}: {exc}"
+            ) from exc
+        if identity.instrument != instrument:
+            raise WorkflowError(
+                f"canonical-looking {instrument} ESAS event file identifies as "
+                f"{identity.instrument}: {path.name}"
+            )
+        matches.append((path.resolve(), identity))
     return matches
 
 
@@ -162,7 +170,7 @@ def pn_oot_event_file(event_file: str | Path) -> Path | None:
         return None
 
     try:
-        science_identity = read_event_identity(path)
+        science_identity = read_science_calinfoset_identity(path)
     except Exception as exc:
         raise WorkflowError(
             f"cannot identify pn science event file before resolving OOT sibling: {path}"
@@ -204,7 +212,7 @@ def pn_oot_event_file(event_file: str | Path) -> Path | None:
         )
 
     try:
-        oot_identity = read_event_identity(oot_path)
+        oot_identity = read_event_association_identity(oot_path)
     except Exception as exc:
         raise WorkflowError(
             f"matching pn OOT sibling is not a readable XMM event product: {oot_path}"

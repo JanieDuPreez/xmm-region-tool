@@ -51,7 +51,7 @@ def _prepare_cli_preflight(monkeypatch, source: Path, event: Path):
     identity = _cli_identity()
     selection = object()
     cell = ExtractionCell(index=1, label="r001", selection=object())
-    monkeypatch.setattr(cli, "read_event_identity", lambda path: identity)
+    monkeypatch.setattr(cli, "read_science_calinfoset_identity", lambda path: identity)
     monkeypatch.setattr(cli, "load_ds9_selection_snapshot", lambda *args, **kwargs: (selection, "a" * 64))
     monkeypatch.setattr(cli, "_cells", lambda args, value: (cell,))
     monkeypatch.setattr(
@@ -131,7 +131,7 @@ def test_cli_rejects_repeated_event_before_identity_read(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         cli,
-        "read_event_identity",
+        "read_science_calinfoset_identity",
         lambda path: (_ for _ in ()).throw(AssertionError("identity read started")),
     )
 
