@@ -65,6 +65,13 @@ def _event_file(
 ) -> None:
     primary = fits.PrimaryHDU()
     primary.header["TELESCOP"] = "XMM"
+    primary.header["INSTRUME"] = instrume
+    primary.header["OBS_ID"] = "0000000001"
+    primary.header["EXPIDSTR"] = exposure
+    primary.header["DATE-OBS"] = "2012-06-08T02:45:44"
+    primary.header["RA_PNT"] = 4.9095747
+    primary.header["DEC_PNT"] = 3.6033689
+    primary.header["PA_PNT"] = 0.0
     if marker is not None:
         primary.header["TESTMARK"] = marker
     table = fits.BinTableHDU.from_columns(
@@ -76,9 +83,10 @@ def _event_file(
         ],
         name="EVENTS",
     )
+    table.header["TELESCOP"] = "XMM"
     table.header["INSTRUME"] = instrume
-    table.header["OBS_ID"] = "001"
-    table.header["EXP_ID"] = exposure
+    table.header["OBS_ID"] = "0000000001"
+    table.header["EXPIDSTR"] = exposure
     fits.HDUList([primary, table]).writeto(path)
 
 
