@@ -9,7 +9,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from .event_roles import validate_projection_event_generation
+from .event_roles import read_science_calinfoset_identity, validate_projection_event_generation
 from .execution import ProjectionRule, SasProjectionContext
 from .geometry import load_ds9_selection_snapshot
 from .path_safety import (
@@ -18,7 +18,7 @@ from .path_safety import (
     validate_distinct_inputs,
     validate_output_namespace,
 )
-from .provenance import EventIdentity, file_sha256, read_event_identity
+from .provenance import EventIdentity, file_sha256
 from .publication import atomic_write_text, lexical_absolute_path
 from .sas import SasConversionError, project_selection
 from .transactional_products import write_projected_product_atomic
@@ -205,7 +205,7 @@ def _validate_event_set(event_files: tuple[Path, ...]) -> tuple[tuple[Path, Even
         )
     except PathSafetyError as exc:
         raise WorkflowError(f"duplicate/aliased event input: {exc}") from exc
-    resolved = tuple((path, read_event_identity(path)) for path in event_files)
+    resolved = tuple((path, read_science_calinfoset_identity(path)) for path in event_files)
     obs_ids = {identity.obs_id for _, identity in resolved}
     if len(obs_ids) > 1:
         joined = ", ".join(sorted(obs_ids))
