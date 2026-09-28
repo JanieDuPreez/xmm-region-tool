@@ -17,7 +17,7 @@ def test_expected_sas_failure_is_rendered_without_traceback(monkeypatch, tmp_pat
 
     monkeypatch.setattr(
         cli,
-        "read_event_identity",
+        "read_science_calinfoset_identity",
         lambda path: SimpleNamespace(
             obs_id="001",
             instrument="mos1",
